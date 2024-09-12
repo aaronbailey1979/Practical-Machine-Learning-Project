@@ -1,0 +1,108 @@
+---
+title: 'Prediction of activity quality'
+output:
+  html_document:
+    keep_md: yes
+  pdf_document: default
+fontsize: 7pt
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+## Summary
+
+Herein we attempt to predict the quality "classe" with which participants complete an array of exercises given various form predictors. The "random forest" technique is used to train the model, which is then tested.
+
+## Uploading and preprocessing data
+
+The training data is "pml-training.csv" and the eventual testing data is 
+"pml-testing.csv".
+
+```{r,echo=TRUE}
+library(caret)
+library(RColorBrewer)
+library(corrplot)
+library(randomForest)
+training_data <- read.csv("pml-training.csv")
+testing_data <- read.csv("pml-testing.csv")
+dim(training_data)
+```
+
+We choose to remove variables 1-7, since they appear to be personal identifiers 
+and time-stamps etc. that don't directly relate to quality.
+
+```{r,echo=TRUE}
+training_data <- training_data[,-(1:7)]
+```
+
+Break the training data into 2 sets for training and cross validation with a 
+typical 3:1 ratio. This split is justified due to the large  number of rows of training_data.
+
+```{r,echo=TRUE}
+set.seed(123)
+inTrain  <- createDataPartition(training_data$classe, p=0.75, list=FALSE)
+sub_train <- training_data[ inTrain,]
+cross_val  <- training_data[-inTrain,]
+```
+
+In sub_train, we need to remove near-zero variables and variables with a 
+high percentage of missing values, say more than 90%. Whatever 
+variables we remove from sub_train, we remove from cross_val also.
+
+```{r,echo=TRUE}
+near_zero <- nearZeroVar(sub_train)
+sub_train <- sub_train[,-near_zero]
+cross_val  <- cross_val[,-near_zero]
+missing_val <- sapply(sub_train, function(x) mean(is.na(x))) > 0.90
+sub_train <- sub_train[,missing_val == FALSE]
+cross_val <- cross_val[,missing_val == FALSE]
+dim(sub_train)
+dim(cross_val)
+```
+
+## A quick examination of correlation in the training set sub_train
+
+Below, we graphically present the correlation matrix of the 53 variables in sub_train. There do not appear to be too many strongly correlated variables, so no dimension-reduction techniques are applied.
+
+```{r,echo=TRUE}
+cor_mat <- cor(sub_train[ , -53])
+corrplot(cor_mat, method = "color", type = "upper", tl.cex = 0.5)
+```
+
+## Training the model
+
+We choose the "random forest" prediction method, which is a reasonable choice at 
+the outset given its typically high performance. The model is trained on sub_train, 
+where we evaluate our progress along the way via 5-fold cross-validation.
+
+```{r,echo=TRUE}
+set.seed(234)
+ctrl <- trainControl(method = "cv", number = 5)
+fit <- train(classe ~ ., data = sub_train, method = "rf", trControl = ctrl,
+               verbose = FALSE)
+fit$finalModel
+```
+
+The model has been determined, so we estimate the predictor's accuracy by 
+applying it to cross_val.
+
+```{r,echo=TRUE}
+rf_pred <- predict(fit, newdata = cross_val)
+rf_conf_mat <- confusionMatrix(rf_pred, factor(cross_val$classe))
+rf_conf_mat
+```
+
+This gives an accuracy of 0.9945, so that the estimated out-of-sample prediction
+error is 0.55%. Now we examine the effectiveness of the random forest 
+method when it is applied to the initial testing set testing_data.
+
+## Testing the model
+
+We test the model on the data set "pml-testing.csv".
+
+```{r,echo=TRUE}
+final_test <- as.data.frame(predict(fit, newdata = testing_data))
+final_test
+```
